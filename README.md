@@ -6,6 +6,30 @@ Works with the free tier of **OpenCode Zen** (Big Pickle and friends) — no pai
 
 ---
 
+## Daily life — nothing to do
+
+Once installed, everything is automatic. You just use opencode normally.
+
+| Situation | What happens (automatic) |
+|---|---|
+| Big Pickle hits its ~50 req / 5h limit mid-session | Session switches to the free chain (Google → OpenRouter) instantly |
+| IP quota is exhausted | Watcher rotates your IP (own VPN first, WARP as backup) within seconds |
+| WARP/VPN drops | Watcher reconnects it within ~20 s (no more waiting 5 minutes) |
+| PC reboots | Watcher + tunnel auto-start at logon |
+| You `git push` | Works normally — no need to touch WARP |
+
+Manual tools (only when you want control):
+- **Health check:** `/fallback-status` inside opencode (or `fallback-status.ps1`)
+- **Rotate IP now:** `powershell -File <config>\warp-rotate\flip.ps1 -Base ... -Key ...`
+- **Turn VPN off/on:** `connect-vps.ps1` / `disconnect-vps.ps1` (own-VPN mode)
+- **Check model list freshness:** `verify-chain.ps1`
+
+> **If a message errors and opencode waits at a prompt:** press `Esc` then type `continue` —
+> the plugin will retry the turn on the fallback chain. With the fixes above this should
+> be rare; it happens when the IP was mid-rotation during your exact request.
+
+---
+
 ## The Problem
 
 OpenCode Zen offers genuinely free models (`opencode/big-pickle`, `opencode/deepseek-v4-flash-free`, `opencode/mimo-v2.5-free`, …). But the free tier has a hidden catch:
@@ -243,6 +267,7 @@ The fallback plugin choice is yours; the chain + WARP scripts work with any of t
 ## Troubleshooting
 
 - **"No models tried / all failed"** → check you added the Google + OpenRouter keys (`opencode auth login`), then `opencode models | grep -E "free|gemini"`.
+- **`git push` used to fail with "curl 52 Empty reply" over WARP** → fixed: `git config --global http.version HTTP/1.1` (pushes now work with WARP connected — no more disconnecting).
 - **Watcher not rotating** → confirm `warp-cli status` says `Connected`; logs at `~/.config/opencode/warp-rotate/watch.log` and `warp-rotate.log`.
 - **WARP manually disconnected → Zen limit instantly reached** → the moment you disconnect, your real ISP IP (already quota-burned) is exposed, so Big Pickle fails again. `rotate-warp.ps1` now self-heals: if WARP is not `Connected` when a rotation is requested, it reconnects WARP first (waiting through the "happy eyeballs" handshake), then rotates — a fresh WARP IP resets the Zen window. The watchdog (`opencode-warp-start.ps1`) also now waits up to 60s for `Connected` instead of giving up after 3s. If you want WARP off for a while, expect Big Pickle to stay dead until it's back; the Google/OpenRouter lanes still carry the session.
 - **IP didn't change** → WARP sometimes reissues the same address; the script retries 3×. Wait ~10 min and rotate again.
