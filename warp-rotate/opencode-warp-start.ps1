@@ -20,7 +20,9 @@ function Test-WatcherRunning {
     try { $mutex = New-Object System.Threading.Mutex($false, 'Global\opencode-warp-watch') } catch { $mutex = $null }
     if ($mutex) {
         $acquired = $false
-        try { $acquired = $mutex.WaitOne(0) } catch {}
+        try { $acquired = $mutex.WaitOne(0) }
+        catch [System.Threading.AbandonedMutexException] { $acquired = $true } # prior owner died: we own it now
+        catch {}
         if ($acquired) { try { $mutex.ReleaseMutex() } catch {} }
         $mutex.Dispose()
         return -not $acquired

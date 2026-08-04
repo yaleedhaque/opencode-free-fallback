@@ -21,7 +21,9 @@ try { $Mutex = [System.Threading.Mutex]::new($false, $MutexName) } catch {}
 
 $alreadyRunning = $false
 if ($Mutex) {
-    try { $alreadyRunning = -not $Mutex.WaitOne(0) } catch { $alreadyRunning = $true }
+    try { $alreadyRunning = -not $Mutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $alreadyRunning = $false } # prior owner died: we own it now
+    catch { $alreadyRunning = $true }
 }
 if ($alreadyRunning) {
     "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] another watcher instance already running - exiting" | Out-File -FilePath $WatchLog -Append -Encoding utf8
@@ -60,10 +62,28 @@ $lastPos = 0
 if (Test-Path $PosFile) { $lastPos = [int](Get-Content $PosFile) }
 if ($lastPos -lt 0) { $lastPos = 0 }
 
+$Warp = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
+$VpsJson = Join-Path $Dir "vps-vpn.json"
+$lastWarpTry = [DateTime]::MinValue
+
 Write-Log "watcher started (interval=${IntervalSeconds}s)"
 
 while ($true) {
     try {
+        # WARP self-heal: if WARP drops (e.g. it was disconnected), bring it back
+        # within one interval instead of waiting for the 5-min watchdog. Skipped in
+        # VPS mode (vps-vpn.json present) where WireGuard is the connection.
+        if ((Test-Path $Warp) -and (-not (Test-Path $VpsJson))) {
+            if (((& $Warp status 2>$null) -join " ") -notmatch "Connected") {
+                $since = (Get-Date) - $lastWarpTry
+                if ($since.TotalSeconds -ge 45) {
+                    $lastWarpTry = Get-Date
+                    Write-Log "WARP not connected - reconnecting (self-heal)"
+                    & $Warp connect 2>$null | Out-Null
+                }
+            }
+        }
+
         $lines, $newPos = Read-NewLines $lastPos
         if ($newPos -gt 0) { $lastPos = $newPos }
 
