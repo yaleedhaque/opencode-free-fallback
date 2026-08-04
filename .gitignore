@@ -1,0 +1,4 @@
+# Logs and local state (never commit these)
+*.log
+watch-pos.txt
+last-rotation.json

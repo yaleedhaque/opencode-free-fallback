@@ -1,0 +1,55 @@
+{
+  // Auto-switch models when Big Pickle (or any Zen free model) hits the Zen
+  // free IP limit. Config for the opencode-runtime-fallback plugin.
+  //
+  // ALL models in the chain are FREE (verified 2026-08-04):
+  //   - google/*      -> Google AI Studio free tier  (~1500 req/day, separate quota)
+  //   - openrouter/*  -> OpenRouter :free tier        (20 req/min, 50-1000 req/day, separate quota)
+  //   - opencode/*    -> Zen free tier                (SHARES big-pickle's IP quota;
+  //                                                    becomes usable again after the WARP
+  //                                                    watcher rotates your public IP)
+  //
+  // Install this file as:  ~/.config/opencode/opencode-fallback.jsonc
+  "enabled": true,
+
+  // HTTP status codes that trigger a fallback to the next model.
+  "retry_on_errors": [429, 500, 502, 503, 504],
+
+  // Extra regex patterns (case-insensitive) matching Zen's "free usage exceeded" errors.
+  "retryable_error_patterns": [
+    "free usage",
+    "free model limit",
+    "free tier limit",
+    "free usage limit"
+  ],
+
+  // Max models to try before giving up.
+  "max_fallback_attempts": 12,
+
+  // How long (seconds) a failed model stays in cooldown. 300s (5 min) lets the
+  // WARP rotation watcher refresh the IP first, then auto-recover to big-pickle.
+  "cooldown_seconds": 300,
+
+  // Abort a fallback model if no token within 90s, then try the next.
+  "timeout_seconds": 90,
+
+  // Toast in the terminal when switching models.
+  "notify_on_fallback": true,
+
+  // Free fallback chain, tried in order. Google + OpenRouter are independent of
+  // the Zen IP limiter; the trailing opencode/*-free models become available
+  // again once the WARP watcher rotates the IP.
+  "fallback_models": [
+    "google/gemini-3.6-flash",
+    "google/gemini-3.1-flash-lite",
+    "openrouter/cohere/north-mini-code:free",
+    "openrouter/poolside/laguna-s-2.1:free",
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+    "opencode/deepseek-v4-flash-free",
+    "opencode/mimo-v2.5-free",
+    "opencode/laguna-s-2.1-free",
+    "opencode/ling-3.0-flash-free",
+    "opencode/north-mini-code-free",
+    "opencode/nemotron-3-ultra-free"
+  ]
+}

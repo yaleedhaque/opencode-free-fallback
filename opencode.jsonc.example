@@ -1,0 +1,6 @@
+{
+  // Example global OpenCode config (copy to ~/.config/opencode/opencode.jsonc).
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/big-pickle",
+  "plugin": ["opencode-runtime-fallback"]
+}
