@@ -76,8 +76,27 @@ while ($true) {
             $lastRotate = Get-LastRotate
             $gap = (Get-Date) - $lastRotate
             if ($gap.TotalMinutes -ge $MinRotateGapMinutes) {
-                Write-Log "fallback detected in $FallbackLog - rotating WARP IP"
-                & $RotateScript -Reason "zen-fallback" 2>&1 | ForEach-Object { Write-Log "  rotate-warp: $_" }
+                # 1) Preferred: own VPS VPN (dedicated IP) - see vps-vpn/bootstrap.ps1
+                $rotated = $false
+                $vpsJson = Join-Path $Dir "vps-vpn.json"
+                $flip = Join-Path $Dir "flip.ps1"
+                if ((Test-Path $vpsJson) -and (Test-Path $flip)) {
+                    try {
+                        $vps = Get-Content $vpsJson -Raw | ConvertFrom-Json
+                        if ($vps.Base -and $vps.Key) {
+                            Write-Log "fallback detected - rotating VPS egress IP"
+                            & $flip -Base $vps.Base -Key $vps.Key 2>&1 | ForEach-Object { Write-Log "  flip: $_" }
+                            $rotated = $true
+                        }
+                    } catch {
+                        Write-Log "VPS rotation error: $($_.Exception.Message)"
+                    }
+                }
+                # 2) Fallback lane: WARP rotation (shared IPs, less reliable but automatic)
+                if (-not $rotated) {
+                    Write-Log "fallback detected in $FallbackLog - rotating WARP IP"
+                    & $RotateScript -Reason "zen-fallback" 2>&1 | ForEach-Object { Write-Log "  rotate-warp: $_" }
+                }
             } else {
                 Write-Log "fallback detected but last rotation was $([math]::Round($gap.TotalMinutes))min ago (< $MinRotateGapMinutes) - skipping"
             }

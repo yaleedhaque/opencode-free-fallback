@@ -1,0 +1,5 @@
+{
+  "Base": "http://<VPS-PUBLIC-IP>:8099",
+  "Key": "<EGRESS_ROTATE_KEY>",
+  "Note": "Written automatically by vps-vpn/bootstrap.ps1. Used by the watcher (opencode-warp-watch.ps1) to auto-rotate the VPS egress IP on fallback."
+}
