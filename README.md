@@ -6,6 +6,32 @@ Works with the free tier of **OpenCode Zen** (Big Pickle and friends) — no pai
 
 ---
 
+## For people who don't read code (start here)
+
+**What is this?** A helper that keeps your AI coding assistant working for free, even after the daily free limit runs out. You install it once, and it fixes itself forever.
+
+**What you need before you start (all free, ~10 minutes):**
+1. **OpenCode** installed — download it from https://opencode.ai
+2. A **free OpenCode account** — open a terminal and type `opencode auth login`
+3. A **free Google API key** (recommended) — https://aistudio.google.com/apikey, then `opencode auth login`
+4. A **free OpenRouter key** (recommended) — https://openrouter.ai/keys, then `opencode auth login`
+
+**How to install (Windows — one command, do NOT be scared):**
+1. Download this project as a ZIP: on this page click the green **`<> Code`** button → **Download ZIP** → extract it anywhere.
+2. Right-click inside the extracted folder → **Open in Terminal**.
+3. Copy-paste this line and press Enter:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File setup-windows.ps1
+   ```
+4. Answer **one question** (type `B` for the quick WARP option, or `A` if you want your own private VPN) and press Enter.
+5. Done. You never have to think about it again — it starts itself when your PC starts.
+
+**What you'll see in daily life:** nothing. If the free limit is reached, it silently switches to another free model and changes your internet IP so the limit resets. The only time you'd notice is a rare message asking you to press `Esc` then type `continue` — that's normal, it's just switching models.
+
+> **What if a window flashes on screen every 5 minutes?** That was a cosmetic bug in older installs — the scheduled check briefly opened a console window. New installs run it silently. Already installed? Re-run the setup file once, or see the Troubleshooting section.
+
+---
+
 ## Daily life — nothing to do
 
 Once installed, everything is automatic. You just use opencode normally.
@@ -156,8 +182,11 @@ copy warp-rotate\*.ps1 "$env:USERPROFILE\.config\opencode\warp-rotate\"
 copy commands\fallback-status.md "$env:USERPROFILE\.config\opencode\commands\"
 # instant start at logon (no admin):
 #   add to HKCU\...\Run -> powershell -File "<config>\warp-rotate\opencode-warp-start.ps1"
-# self-healing (restarts the watcher if it dies every 5 min):
-schtasks /Create /F /TN opencode-warp-watchdog /SC MINUTE /MO 5 /TR "powershell.exe -File <config>\warp-rotate\opencode-warp-start.ps1"
+# self-healing (restarts the watcher if it dies every 5 min) - SILENTLY, no flashing window:
+#   the scheduled task runs wscript.exe (never creates a console), which launches the
+#   start script hidden. Generate the tiny launcher, then register the task:
+powershell -File "$env:USERPROFILE\.config\opencode\warp-rotate\make-watchdog-vbs.ps1"
+schtasks /Create /F /TN opencode-warp-watchdog /SC MINUTE /MO 5 /TR "wscript.exe `"$env:USERPROFILE\.config\opencode\warp-rotate\run-hidden-watchdog.vbs`""
 Start-Process powershell -ArgumentList '-File', '"<your>\.config\opencode\warp-rotate\opencode-warp-start.ps1"'
 
 # 5. Done - install-warp.ps1 already connected WARP. Verify:
@@ -226,6 +255,7 @@ The watcher no longer relies on a single process that can silently die. It is no
 
 1. **Started at logon** via the HKCU Run key (`opencode-warp-rotate`) — instant, no admin needed.
 2. **Watchdogged** by a scheduled task (`opencode-warp-watchdog`, every 5 min) that runs `opencode-warp-start.ps1`: if the watcher holds no mutex, it relaunches it hidden; it also re-connects WARP if it dropped. A dead watcher self-heals within minutes.
+   The task launches `wscript.exe run-hidden-watchdog.vbs` instead of `powershell.exe` directly — wscript never creates a console window, so the 5-minute check is **completely silent** (no flashing terminal on your screen).
 3. Runs the same mutex-guarded loop as before (no duplicate instances).
 
 ## Observability
@@ -267,6 +297,12 @@ The fallback plugin choice is yours; the chain + WARP scripts work with any of t
 ## Troubleshooting
 
 - **"No models tried / all failed"** → check you added the Google + OpenRouter keys (`opencode auth login`), then `opencode models | grep -E "free|gemini"`.
+- **A terminal window flashes for a split second every ~5 minutes** → that's the watchdog task launching `powershell.exe` directly (Task Scheduler creates a console window even with `-WindowStyle Hidden`). Fix: re-point the task at the silent wscript launcher:
+  ```powershell
+  $vbs = "$env:USERPROFILE\.config\opencode\warp-rotate\run-hidden-watchdog.vbs"
+  schtasks /Change /TN opencode-warp-watchdog /TR "wscript.exe `"$vbs`""
+  ```
+  (If the `.vbs` is missing, re-run `setup-windows.ps1` or create it from the manual steps above. New installs already get the silent launcher automatically.)
 - **`git push` used to fail with "curl 52 Empty reply" over WARP** → fixed: `git config --global http.version HTTP/1.1` (pushes now work with WARP connected — no more disconnecting).
 - **Watcher not rotating** → confirm `warp-cli status` says `Connected`; logs at `~/.config/opencode/warp-rotate/watch.log` and `warp-rotate.log`.
 - **WARP manually disconnected → Zen limit instantly reached** → the moment you disconnect, your real ISP IP (already quota-burned) is exposed, so Big Pickle fails again. `rotate-warp.ps1` now self-heals: if WARP is not `Connected` when a rotation is requested, it reconnects WARP first (waiting through the "happy eyeballs" handshake), then rotates — a fresh WARP IP resets the Zen window. The watchdog (`opencode-warp-start.ps1`) also now waits up to 60s for `Connected` instead of giving up after 3s. If you want WARP off for a while, expect Big Pickle to stay dead until it's back; the Google/OpenRouter lanes still carry the session.
@@ -284,3 +320,7 @@ The fallback plugin choice is yours; the chain + WARP scripts work with any of t
 ## License
 
 [MIT](LICENSE)
+
+---
+
+**Md. Yaleed Haque** — [GitHub](https://github.com/yaleedhaque) · [Portfolio](https://yaleedhaque.github.io) · yaleedhaque@users.noreply.github.com

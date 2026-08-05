@@ -139,3 +139,7 @@ For rotation to pick a *different* IP, the VM needs 2+ addresses:
   limited to one region.
 - Don't touch the instance's **primary** public IP after WireGuard works or SSH may drop.
   Use flip.ps1 / secondary IPs for rotation, never the primary.
+
+---
+
+**Md. Yaleed Haque** — [GitHub](https://github.com/yaleedhaque) · [Portfolio](https://yaleedhaque.github.io) · yaleedhaque@users.noreply.github.com

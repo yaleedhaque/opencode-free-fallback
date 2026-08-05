@@ -48,6 +48,7 @@ New-Item -ItemType Directory -Path $WarpDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\rotate-warp.ps1") -Destination $WarpDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\opencode-warp-watch.ps1") -Destination $WarpDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\opencode-warp-start.ps1") -Destination $WarpDir -Force
+Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\make-watchdog-vbs.ps1") -Destination $WarpDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\install-warp.ps1") -Destination $WarpDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\verify-chain.ps1") -Destination $WarpDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoDir "warp-rotate\fallback-status.ps1") -Destination $WarpDir -Force
@@ -108,10 +109,15 @@ if (Test-Path $startScript) {
     Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "opencode-warp-rotate" -Value $cmd
     Write-Host "[5/5] Watcher autostart registered (logon)." -ForegroundColor Green
 
-    $tr = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $startScript + '"'
+    # Hidden launcher: powershell -WindowStyle Hidden still flashes a console window
+    # for a split second on every scheduled-task run. wscript.exe never creates a
+    # console at all, so the 5-min watchdog runs completely silently.
+    & (Join-Path $WarpDir "make-watchdog-vbs.ps1")
+    $vbs = Join-Path $WarpDir "run-hidden-watchdog.vbs"
+    $tr = 'wscript.exe "' + $vbs + '"'
     schtasks /Create /F /TN "opencode-warp-watchdog" /SC MINUTE /MO 5 /TR $tr | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[5/5] Watchdog registered (self-heals every 5 min)." -ForegroundColor Green
+        Write-Host "[5/5] Watchdog registered (self-heals every 5 min, silent)." -ForegroundColor Green
     } else {
         Write-Host "NOTE: watchdog scheduled task failed (may need an admin shell once)." -ForegroundColor Yellow
     }
