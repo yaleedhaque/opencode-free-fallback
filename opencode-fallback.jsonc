@@ -1,10 +1,16 @@
 {
   // Auto-switch models when Big Pickle hits the Zen free IP limit.
   // Config for the opencode-runtime-fallback plugin (https://github.com/youngbinkim0/opencode-fallback).
-  // ALL models in the chain are FREE (verified 2026-08-04):
-  //   - google/*      -> Google AI Studio free tier  (~1500 req/day, separate quota)
-  //   - openrouter/*  -> OpenRouter :free tier        (20/min, 50-1000 req/day, separate quota)
-  //   - opencode/*    -> Zen free tier                (SHARES big-pickle's IP quota; works after WARP rotation)
+  //
+  // BIG-PICKLE-ONLY MODE (2026-08-06):
+  // The chain contains ONLY opencode/*-free models. These SHARE big-pickle's
+  // per-IP free quota, so on a burned IP they fail instantly too. That failure
+  // logs "Auto-retrying with fallback model" -> the WARP watcher rotates the
+  // IP -> after cooldown the plugin auto-recovers to big-pickle. Google and
+  // OpenRouter are deliberately NOT in the chain: they have independent quotas
+  // and would actually serve replies during the window (user: they don't work
+  // properly). With a Zen-only chain, big-pickle is effectively the ONLY model
+  // that ever answers; WARP rotation is what makes it "unlimited".
   "enabled": true,
 
   // HTTP status codes that trigger a fallback to the next model.
@@ -26,12 +32,15 @@
     "overloaded"
   ],
 
-  // Max models to try before giving up.
-  "max_fallback_attempts": 20,
+  // Max fallback attempts per request. The Zen-only chain is 6 models; 10 gives
+  // headroom while still surfacing errors fast on a burned IP (don't churn).
+  "max_fallback_attempts": 10,
 
-  // How long (seconds) a failed model stays in cooldown. 300s (5 min) lets the
-  // WARP rotation watcher refresh the IP first, then auto-recover to big-pickle.
-  "cooldown_seconds": 300,
+  // How long (seconds) a failed model stays in cooldown. 180s (3 min) gives the
+  // WARP rotation watcher ~2-3x margin to refresh the IP (rotations verified
+  // ~30-45s), then auto-recovers to big-pickle faster than the old 300s. If a
+  // slow rotation makes big-pickle fail again, it just re-enters cooldown.
+  "cooldown_seconds": 180,
 
   // Abort a fallback model if no token within 90s, then try the next.
   "timeout_seconds": 90,
@@ -39,49 +48,41 @@
   // Toast when switching models.
   "notify_on_fallback": true,
 
-  // Free fallback chain, tried in order. Google + OpenRouter are independent of
-  // the Zen IP limiter; the trailing opencode/*-free models become available
-  // again once the WARP watcher rotates the IP.
+  // BIG-PICKLE-ONLY fallback chain, tried in order.
   //
-  // Ordering: Google (best quality, huge quota) first, then the most capable
-  // OpenRouter :free coding models, then the smaller OpenRouter ones, and finally
-  // the Zen free models (only usable again after a fresh WARP IP).
+  // ONLY opencode/*-free models. These SHARE big-pickle's per-IP Zen quota, so
+  // on a burned IP they fail instantly — which is exactly the point: the failure
+  // fires the "Auto-retrying with fallback model" log line, the WARP watcher
+  // rotates the IP, and after cooldown the plugin auto-recovers to big-pickle.
+  //
+  // Google + OpenRouter are NOT here (they have independent quotas and would
+  // actually serve replies — the user reported they don't work properly). With a
+  // Zen-only chain, big-pickle is the only model that ever answers; the chain
+  // entries exist purely to trigger rotation.
   "fallback_models": [
-    "google/gemini-3.6-flash",                       // Google AI Studio free tier
-    "google/gemini-3.1-flash-lite",                  // faster / lighter
-    "openrouter/cohere/north-mini-code:free",        // 256K ctx, coding-tuned
-    "openrouter/poolside/laguna-s-2.1:free",
-    "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-    "openrouter/openai/gpt-oss-20b:free",
-    "openrouter/google/gemma-4-31b-it:free",
-    "openrouter/google/gemma-4-26b-a4b-it:free",
-    "openrouter/inclusionai/ling-3.0-flash:free",
-    "openrouter/poolside/laguna-xs-2.1:free",
-    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free",
-    "opencode/deepseek-v4-flash-free",               // Zen free (needs fresh IP)
+    "opencode/deepseek-v4-flash-free",
     "opencode/mimo-v2.5-free",
     "opencode/laguna-s-2.1-free",
     "opencode/ling-3.0-flash-free",
     "opencode/north-mini-code-free",
     "opencode/nemotron-3-ultra-free"
-  ],
-
-  // EXTRA LANES - uncomment each block AFTER adding the provider key via
-  // `opencode auth login` (guide: README.md "Adding free provider lanes").
-  // These give independent, high-volume free quotas:
-  //
-  // Groq (free key: https://console.groq.com/keys, ~1K-14.4K req/day):
-  //   "groq/gpt-oss-20b",
-  //   "groq/llama-4-scout-17b-16e-instruct",
-  // Cerebras (free key: https://cloud.cerebras.ai, 30 RPM, 1M tokens/day):
-  //   "cerebras/qwen3-235b-a22b",
-  // NVIDIA NIM (free key: https://build.nvidia.com, ~40 RPM, no card):
-  //   "nvidia/glm-5.1",
-  //   "nvidia/kimi-k2.6",
-  // GitHub Copilot free (already authed on this machine; 50 premium req/month):
-  //   "copilot/gpt-4.1"  (model id depends on the Copilot plan exposed by opencode)
-  //
-  // NOTE: opencode-go/* and kimi-for-coding/* are NOT free on this account
-  // (verified 2026-08-04: Go needs a payment method, Kimi key is expired).
+  ]
 }
+
+// EXTRA LANES - uncomment each block AFTER adding the provider key via
+// `opencode auth login` (guide: README.md "Adding free provider lanes").
+// These give independent, high-volume free quotas:
+//
+// Groq (free key: https://console.groq.com/keys, ~1K-14.4K req/day):
+//   "groq/gpt-oss-20b",
+//   "groq/llama-4-scout-17b-16e-instruct",
+// Cerebras (free key: https://cloud.cerebras.ai, 30 RPM, 1M tokens/day):
+//   "cerebras/qwen3-235b-a22b",
+// NVIDIA NIM (free key: https://build.nvidia.com, ~40 RPM, no card):
+//   "nvidia/glm-5.1",
+//   "nvidia/kimi-k2.6",
+// GitHub Copilot free (already authed on this machine; 50 premium req/month):
+//   "copilot/gpt-4.1"  (model id depends on the Copilot plan exposed by opencode)
+//
+// NOTE: opencode-go/* and kimi-for-coding/* are NOT free on this account
+// (verified 2026-08-04: Go needs a payment method, Kimi key is expired).

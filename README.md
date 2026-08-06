@@ -38,7 +38,7 @@ Once installed, everything is automatic. You just use opencode normally.
 
 | Situation | What happens (automatic) |
 |---|---|
-| Big Pickle hits its ~50 req / 5h limit mid-session | Session switches to the free chain (Google → OpenRouter) instantly |
+| Big Pickle hits its ~50 req / 5h limit mid-session | Watcher rotates WARP IP; big-pickle auto-recovers after ~3 min cooldown (Big-Pickle-only mode, no Google/OpenRouter) |
 | IP quota is exhausted | Watcher rotates your IP (own VPN first, WARP as backup) within seconds |
 | WARP/VPN drops | Watcher reconnects it within ~20 s (no more waiting 5 minutes) |
 | PC reboots | Watcher + tunnel auto-start at logon |
@@ -74,44 +74,43 @@ References: [opencode#15585](https://github.com/anomalyco/opencode/issues/15585)
 1) AUTO MODEL FALLBACK         2) AUTO IP ROTATION
    (fallback plugin)              (Cloudflare WARP watcher)
 
-   big-pickle fails ──┬────────────► fallback chain continues
-                      │              the session instantly on other
-                      │              FREE models (Google AI Studio +
-                      │              OpenRouter :free) — different
-                      │              providers, independent quotas
+   big-pickle fails ──┬────────────► plugin briefly tries the Zen-only
+                      │              chain (opencode/*-free) - those SHARE
+                      │              the same burned IP, so they fail fast
+                      │              and act purely as the rotation trigger
                       │
-                      └──► watcher sees the fallback event and
-                           rotates WARP registration → new public IP
-                           → Zen free quota resets → 5 min later the
-                           plugin auto-switches back to big-pickle
+                      └──► watcher sees the fallback event and rotates
+                           WARP registration → new public IP → Zen free
+                           quota resets → ~3 min later the plugin auto-
+                           switches back to big-pickle (the ONLY model
+                           that ever answers - Google/OpenRouter removed)
 ```
 
 | Layer | What | Quota | Cost |
 |---|---|---|---|
-| Zen free (`opencode/big-pickle` + `-free` models) | primary, best quality | ~50 req / 5h per IP | $0 |
-| Google AI Studio (`google/gemini-*`) | fallback | ~1,500 req/day | $0 |
-| OpenRouter `:free` models | fallback | 20 req/min, 50–1,000 req/day | $0 |
+| Zen free (`opencode/big-pickle` primary) | THE model - always answers | ~50 req / 5h per IP | $0 |
+| `opencode/*-free` chain | rotation trigger only (shares same IP) | shares big-pickle's quota | $0 |
 | Cloudflare WARP | IP rotation | unlimited | $0 |
 
 ## Verified Free Fallback Chain
 
-All models below were **actually tested** against the fallback plugin (2026-08-04). Fallbacks are ordered best → lightest. Google and OpenRouter are independent of the Zen IP limiter; the trailing `opencode/*-free` models only help again once WARP has rotated the IP.
+### BIG-PICKLE-ONLY MODE (default since 2026-08-06)
+
+The chain contains **ONLY `opencode/*-free` models** — Google and OpenRouter are
+deliberately excluded. These models SHARE Big Pickle's per-IP Zen free quota, so on
+a burned IP they fail instantly. That failure is what fires the "Auto-retrying with
+fallback model" log line → the WARP watcher rotates the IP → after the cooldown the
+plugin auto-recovers to Big Pickle. Net effect: **Big Pickle is the only model that
+ever answers**; the chain entries exist purely to trigger rotation.
+
+> Why not Google/OpenRouter? They have independent quotas and would actually serve
+> replies during the cooldown window — but the user reported they "don't work
+> properly". Removing them guarantees no quality drop; the only cost is that a burned
+> IP waits for rotation + cooldown (~3 min) instead of switching to a foreign model.
 
 ```jsonc
 "fallback_models": [
-  "google/gemini-3.6-flash",                    // Google AI Studio free tier
-  "google/gemini-3.1-flash-lite",               // faster / lighter
-  "openrouter/cohere/north-mini-code:free",     // 256K ctx, coding-tuned
-  "openrouter/poolside/laguna-s-2.1:free",
-  "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-  "openrouter/openai/gpt-oss-20b:free",
-  "openrouter/google/gemma-4-31b-it:free",
-  "openrouter/google/gemma-4-26b-a4b-it:free",
-  "openrouter/inclusionai/ling-3.0-flash:free",
-  "openrouter/poolside/laguna-xs-2.1:free",
-  "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-  "openrouter/nvidia/nemotron-3-nano-30b-a3b:free",
-  "opencode/deepseek-v4-flash-free",            // Zen free (needs fresh IP)
+  "opencode/deepseek-v4-flash-free",            // Zen free (SHARES big-pickle's IP quota)
   "opencode/mimo-v2.5-free",
   "opencode/laguna-s-2.1-free",
   "opencode/ling-3.0-flash-free",
@@ -120,13 +119,12 @@ All models below were **actually tested** against the fallback plugin (2026-08-0
 ]
 ```
 
-More free options you can add (verify with `opencode models | grep free`):
+If you ever prefer the old "keep working on ANY free model" behaviour, the tested
+Google + OpenRouter lanes (2026-08-04) can be re-added:
 
-```text
-openrouter/openai/gpt-oss-20b:free
-openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
-openrouter/google/gemma-4-26b-a4b-it:free
-openrouter/poolside/laguna-xs-2.1:free
+```jsonc
+// google/gemini-3.6-flash                 // Google AI Studio free tier
+// openrouter/cohere/north-mini-code:free  // OpenRouter :free (needs key)
 ```
 
 ## Prerequisites (all free)
@@ -135,11 +133,11 @@ openrouter/poolside/laguna-xs-2.1:free
 |---|---|---|
 | OpenCode | https://opencode.ai | the agent itself |
 | OpenCode Zen key | `opencode auth login` (free account) | Big Pickle |
-| Google AI Studio key | https://aistudio.google.com/apikey → `opencode auth login` | Google fallbacks |
-| OpenRouter key | https://openrouter.ai/keys → `opencode auth login` | OpenRouter fallbacks |
-| Cloudflare WARP | https://one.one.one.one/ (free) | IP rotation |
+| Cloudflare WARP | https://one.one.one.one/ (free) | IP rotation (required for Big-Pickle-only mode) |
 
-> The Google and OpenRouter keys are optional but **recommended** — without them the chain is just Big Pickle → (dead Zen models until WARP rotates). With them, sessions survive even long outages.
+> Google and OpenRouter keys are **NOT needed** in Big-Pickle-only mode — the chain
+> is Zen-only by design. You only add them if you want the old "fall back to any free
+> model" behaviour back.
 
 ## Quick Start — Windows
 
@@ -157,7 +155,12 @@ It asks one question — which IP-rotation method:
   a **dedicated** public IP that only you burn, so Big Pickle reliably gets its full
   ~50 req / 5h window (no shared-IP lottery like WARP). Rotation is automatic.
 - **(B) Cloudflare WARP** — quick, shared IPs; auto-installs WARP for you if missing.
-- **(C) None** — just the fallback chain (Google / OpenRouter carry your sessions).
+- **(C) None** — Big-Pickle-only still works, but without IP rotation there is no way
+  to refresh the burned quota, so a hit means waiting for the ~5h window. (Recommended:
+  pick A or B.)
+
+In every mode the chain is **Big-Pickle-only** (Zen `opencode/*-free` rotation triggers,
+no Google/OpenRouter) — installs are identical; only the rotation backend differs.
 
 Whichever you pick, it installs the plugin, chain config, watcher (autostart at logon),
 self-healing watchdog, and `/fallback-status` — then you're done.

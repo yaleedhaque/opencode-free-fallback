@@ -12,7 +12,10 @@ WATCH_LOG="$DIR/watch.log"
 POS_FILE="$DIR/watch-pos.txt"
 STATE_FILE="$DIR/last-rotation.json"
 TRIGGER="Auto-retrying with fallback model"
-MIN_GAP_MINUTES=10
+# Extra trigger: plugin logs this as soon as it sees the provider retry (429/quota),
+# BEFORE the fallback replay. Rotating on it starts the IP refresh earlier.
+TRIGGER2="Provider retry detected"
+MIN_GAP_MINUTES=5
 INTERVAL="${1:-20}"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $*" >> "$WATCH_LOG"; }
@@ -36,7 +39,7 @@ while true; do
     if [ "$size" -gt "$last_pos" ]; then
       tail -c +$((last_pos+1)) "$FALLBACK_LOG" | while IFS= read -r line; do
         case "$line" in
-          *"$TRIGGER"*)
+          *"$TRIGGER"*|*"$TRIGGER2"*)
             if [ -f "$STATE_FILE" ]; then
               last_rotate=$(grep -o '"lastRotation":"[^"]*"' "$STATE_FILE" | cut -d'"' -f4)
               last_epoch=$(date -d "$last_rotate" +%s 2>/dev/null || echo 0)

@@ -13,7 +13,11 @@ $WatchLog = Join-Path $Dir "watch.log"
 $PosFile = Join-Path $Dir "watch-pos.txt"
 $StateFile = Join-Path $Dir "last-rotation.json"
 $TriggerPattern = "Auto-retrying with fallback model"
-$MinRotateGapMinutes = 10
+# Additional trigger: the plugin logs this as soon as it sees the provider retry
+# (429/quota) signal, BEFORE the fallback replay. Rotating on it starts the IP
+# refresh earlier, shortening the dead window to ~the cooldown itself.
+$TriggerPattern2 = "Provider retry detected"
+$MinRotateGapMinutes = 5
 
 $MutexName = "Global\opencode-warp-watch"
 $Mutex = $null
@@ -89,7 +93,7 @@ while ($true) {
 
         $triggered = $false
         foreach ($line in $lines) {
-            if ($line -like "*$TriggerPattern*") { $triggered = $true; break }
+            if ($line -like "*$TriggerPattern*" -or $line -like "*$TriggerPattern2*") { $triggered = $true; break }
         }
 
         if ($triggered) {
