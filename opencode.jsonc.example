@@ -2,9 +2,8 @@
   // Example global OpenCode config (copy to ~/.config/opencode/opencode.jsonc).
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode/big-pickle",
-  // Chores (title gen, compaction summaries) run on Google's separate 1500/day
-  // free quota instead of burning Zen's ~50 req / 5h window.
-  "small_model": "google/gemini-3.1-flash-lite",
+  // STRICT MODE: no small_model -- big-pickle is the ONLY model (titles,
+  // compaction summaries, everything). Chores burn Zen quota; see README.
   "plugin": ["opencode-runtime-fallback"],
   // Prune stale tool output at compaction -> fewer tokens per request ->
   // more requests fit inside each quota window.

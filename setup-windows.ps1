@@ -7,7 +7,7 @@
 #   3. Rotation mode:
 #        A) Own VPN (recommended) - guided: free Oracle VM + WireGuard dedicated IP
 #        B) Cloudflare WARP        - quick, shared IPs (auto-installs if missing)
-#        C) None                   - fallback chain only (Google/OpenRouter carry you)
+#        C) None                   - strict big-pickle mode (empty chain, no IP rotation)
 #   4. Registers watcher autostart (logon) + 5-min self-healing watchdog
 #   5. Installs the /fallback-status command + verify-chain churn guard
 param()

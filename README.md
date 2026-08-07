@@ -71,55 +71,57 @@ References: [opencode#15585](https://github.com/anomalyco/opencode/issues/15585)
 ## The Solution (2 layers, both free)
 
 ```
-1) AUTO MODEL FALLBACK         2) AUTO IP ROTATION
-   (fallback plugin)              (Cloudflare WARP watcher)
+1) NO MODEL SWITCH              2) AUTO IP ROTATION
+   (empty fallback chain)          (Cloudflare WARP watcher)
 
-   big-pickle fails ──┬────────────► plugin briefly tries the Zen-only
-                      │              chain (opencode/*-free) - those SHARE
-                      │              the same burned IP, so they fail fast
-                      │              and act purely as the rotation trigger
+   big-pickle fails ──┬────────────► plugin logs "Provider retry detected"
+                      │              (empty chain → NO other model answers,
+                      │              shows "no fallback models configured")
                       │
-                      └──► watcher sees the fallback event and rotates
-                           WARP registration → new public IP → Zen free
-                           quota resets → ~3 min later the plugin auto-
-                           switches back to big-pickle (the ONLY model
-                           that ever answers - Google/OpenRouter removed)
+                      └──► watcher sees the event and rotates WARP
+                           registration → new public IP → Zen free quota
+                           resets → you re-send the message → big-pickle
+                           answers from the fresh IP (ONLY model ever used)
 ```
 
 | Layer | What | Quota | Cost |
 |---|---|---|---|
-| Zen free (`opencode/big-pickle` primary) | THE model - always answers | ~50 req / 5h per IP | $0 |
-| `opencode/*-free` chain | rotation trigger only (shares same IP) | shares big-pickle's quota | $0 |
+| Zen free (`opencode/big-pickle` primary) | THE only model - always answers | ~50 req / 5h per IP | $0 |
+| `fallback_models` (empty `[]`) | no other model is ever allowed to answer; triggers WARP rotation | — | $0 |
 | Cloudflare WARP | IP rotation | unlimited | $0 |
 
-## Verified Free Fallback Chain
+## Verified Fallback Chain
 
-### BIG-PICKLE-ONLY MODE (default since 2026-08-06)
+### STRICT BIG-PICKLE MODE (default since 2026-08-07)
 
-The chain contains **ONLY `opencode/*-free` models** — Google and OpenRouter are
-deliberately excluded. These models SHARE Big Pickle's per-IP Zen free quota, so on
-a burned IP they fail instantly. That failure is what fires the "Auto-retrying with
-fallback model" log line → the WARP watcher rotates the IP → after the cooldown the
-plugin auto-recovers to Big Pickle. Net effect: **Big Pickle is the only model that
-ever answers**; the chain entries exist purely to trigger rotation.
+**User rule: ONLY `opencode/big-pickle` may answer. When the limit is reached,
+opencode must NOT change to any other model.**
 
-> Why not Google/OpenRouter? They have independent quotas and would actually serve
-> replies during the cooldown window — but the user reported they "don't work
-> properly". Removing them guarantees no quality drop; the only cost is that a burned
-> IP waits for rotation + cooldown (~3 min) instead of switching to a foreign model.
+`fallback_models` is therefore **empty**:
 
 ```jsonc
-"fallback_models": [
-  "opencode/deepseek-v4-flash-free",            // Zen free (SHARES big-pickle's IP quota)
-  "opencode/mimo-v2.5-free",
-  "opencode/laguna-s-2.1-free",
-  "opencode/ling-3.0-flash-free",
-  "opencode/north-mini-code-free",
-  "opencode/nemotron-3-ultra-free"
-]
+"fallback_models": []
 ```
 
-If you ever prefer the old "keep working on ANY free model" behaviour, the tested
+With an empty chain the plugin behaves like this (verified in
+`opencode-runtime-fallback` dist source):
+
+- Big Pickle hits `429 / Free usage exceeded` → the plugin logs
+  **`Provider retry detected`** — this is the log line the WARP watcher greps
+  for → WARP rotates the IP.
+- `fallbackModels.length === 0` → the plugin shows a **"Provider Retrying (no
+  fallback models configured)"** toast and returns. It does **not** replay the
+  turn on any other model, so no foreign model ever answers.
+- After the IP rotation, re-send the message and Big Pickle answers normally.
+
+> Why did the old chain go away? The previous mode (2026-08-06) kept six
+> `opencode/*-free` models purely as rotation triggers, on the theory they share
+> Big Pickle's per-IP quota so they'd fail instantly. In practice
+> `opencode/nemotron-3-ultra-free` **actually served replies** during the cooldown
+> window (seen 2026-08-07 15:54 UTC) — a different model answering. User: stop.
+> Empty chain = impossible to switch models, period.
+
+If you ever prefer the old "keep working on ANY free model" behaviour, tested
 Google + OpenRouter lanes (2026-08-04) can be re-added:
 
 ```jsonc
@@ -135,8 +137,8 @@ Google + OpenRouter lanes (2026-08-04) can be re-added:
 | OpenCode Zen key | `opencode auth login` (free account) | Big Pickle |
 | Cloudflare WARP | https://one.one.one.one/ (free) | IP rotation (required for Big-Pickle-only mode) |
 
-> Google and OpenRouter keys are **NOT needed** in Big-Pickle-only mode — the chain
-> is Zen-only by design. You only add them if you want the old "fall back to any free
+> Google and OpenRouter keys are **NOT needed** in strict Big-Pickle mode — the chain
+> is empty by design. You only add them if you want the old "fall back to any free
 > model" behaviour back.
 
 ## Quick Start — Windows
@@ -159,8 +161,8 @@ It asks one question — which IP-rotation method:
   to refresh the burned quota, so a hit means waiting for the ~5h window. (Recommended:
   pick A or B.)
 
-In every mode the chain is **Big-Pickle-only** (Zen `opencode/*-free` rotation triggers,
-no Google/OpenRouter) — installs are identical; only the rotation backend differs.
+In every mode the chain is **empty** — strict Big-Pickle only, no model switching,
+no Google/OpenRouter — installs are identical; only the rotation backend differs.
 
 Whichever you pick, it installs the plugin, chain config, watcher (autostart at logon),
 self-healing watchdog, and `/fallback-status` — then you're done.
@@ -213,11 +215,10 @@ nohup ./warp-rotate/opencode-warp-watch.sh 20 &
 
 ## How It Works
 
-1. **Fallback plugin** (`opencode-runtime-fallback`) listens for message errors. When Big Pickle returns a 429 / `Free usage exceeded`, it aborts the turn and replays it on the next model in `fallback_models`.
-2. Models that fail enter a **5-minute cooldown**; the plugin tries the next one. Google/OpenRouter free tiers are separate accounts/IPs, so they keep working.
-3. **WARP watcher** polls `~/.config/opencode/opencode-fallback.log` every 20s. When it sees `Auto-retrying with fallback model` (the plugin's dispatch log), it runs `rotate-warp.ps1/.sh`:
+1. **Fallback plugin** (`opencode-runtime-fallback`) listens for message errors. When Big Pickle returns a 429 / `Free usage exceeded`, it logs **`Provider retry detected`** (the WARP watcher's trigger) and, because `fallback_models` is empty, shows a "Provider Retrying (no fallback models configured)" toast — **no other model is ever dispatched**.
+2. **WARP watcher** polls `~/.config/opencode/opencode-fallback.log` every 20s. When it sees `Provider retry detected` (or `Auto-retrying with fallback model` if a chain is ever re-added), it runs `rotate-warp.ps1/.sh`:
    `warp-cli disconnect → registration delete → registration new → connect → verify IP changed`.
-4. The new public IP gives Big Pickle a fresh ~50-request / 5h window. When its 5-minute cooldown expires, the plugin **auto-recovers** to Big Pickle and your normal workflow resumes.
+3. The new public IP gives Big Pickle a fresh ~50-request / 5h window. Re-send the failed message and Big Pickle answers from the fresh IP — still the only model that ever talks.
 
 ## Config Reference
 
@@ -227,9 +228,9 @@ nohup ./warp-rotate/opencode-warp-watch.sh 20 &
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode/big-pickle",
-  // Chores (title gen, compaction summaries) run on Google's separate ~1500/day
-  // free quota instead of burning Zen's ~50 req / 5h window.
-  "small_model": "google/gemini-3.1-flash-lite",
+  // STRICT MODE: no small_model — big-pickle is the ONLY model. Titles,
+  // compaction summaries, everything run on big-pickle (burns Zen quota,
+  // but respects "only big-pickle").
   "plugin": ["opencode-runtime-fallback"],
   // Prune stale tool output at compaction -> fewer tokens per request ->
   // more requests fit inside each quota window.
@@ -245,12 +246,11 @@ nohup ./warp-rotate/opencode-warp-watch.sh 20 &
 
 | Key | Value | Meaning |
 |---|---|---|
-| `retry_on_errors` | `[429,500,502,503,504]` | trigger fallback on these HTTP codes |
-| `retryable_error_patterns` | `["free usage", "rate limit", "FreeUsageLimitError", ...]` | trigger on text errors too (Zen + OpenRouter/Google phrasings) |
-| `max_fallback_attempts` | `20` | how many models to try |
-| `cooldown_seconds` | `300` | retry big-pickle after 5 min (IP is rotated by then) |
-| `timeout_seconds` | `90` | give up on a slow fallback and move on |
-| `notify_on_fallback` | `true` | toast on switch |
+| `fallback_models` | `[]` | **empty on purpose** — no other model may answer (strict mode) |
+| `retry_on_errors` | `[429,500,502,503,504]` | recognise these HTTP codes as a burn |
+| `retryable_error_patterns` | `["free usage", "rate limit", "FreeUsageLimitError", ...]` | recognise text errors too |
+| `notify_on_fallback` | `true` | toast "Provider Retrying (no fallback models configured)" when the limit is hit |
+| `cooldown_seconds` | `180` | wait between retries (matches WARP rotation time) |
 
 ## Self-healing WARP watcher
 
@@ -263,8 +263,8 @@ The watcher no longer relies on a single process that can silently die. It is no
 
 ## Observability
 
-- **`/fallback-status`** (installed as a global command): one-shot health report — opencode version, primary/small models, chain size, WARP status + public IP, watcher PID, last IP rotation, recent fallback events.
-- **`verify-chain.ps1`** (in `warp-rotate/`): the Zen/OpenRouter free lists rotate monthly; this diffs your chain against `opencode models` and flags (a) stale chain models and (b) new free models worth adding. Run manually or schedule weekly:
+- **`/fallback-status`** (installed as a global command): one-shot health report — opencode version, primary model, chain size (0 = strict mode), WARP status + public IP, watcher PID, last IP rotation, recent fallback events.
+- **`verify-chain.ps1`** (in `warp-rotate/`): in strict mode the chain is empty, so this reports "strict mode — no chain to verify". If you later re-add models, it diffs your chain against `opencode models` and flags (a) stale chain models and (b) new free models worth adding. Run manually or schedule weekly:
   `schtasks /Create /TN opencode-chain-verify /SC WEEKLY /D FRI /ST 09:00 /TR "powershell -File ...\warp-rotate\verify-chain.ps1"`
 
 ## Adding free provider lanes (optional but recommended)
@@ -299,7 +299,7 @@ The fallback plugin choice is yours; the chain + WARP scripts work with any of t
 
 ## Troubleshooting
 
-- **"No models tried / all failed"** → check you added the Google + OpenRouter keys (`opencode auth login`), then `opencode models | grep -E "free|gemini"`.
+- **"No models tried / all failed"** → in strict mode there are no fallback models by design; the toast says "Provider Retrying (no fallback models configured)". Wait for the WARP rotation then re-send. If you re-added a chain, check `opencode auth login` keys.
 - **A terminal window flashes for a split second every ~5 minutes** → that's the watchdog task launching `powershell.exe` directly (Task Scheduler creates a console window even with `-WindowStyle Hidden`). Fix: re-point the task at the silent wscript launcher:
   ```powershell
   $vbs = "$env:USERPROFILE\.config\opencode\warp-rotate\run-hidden-watchdog.vbs"
@@ -308,9 +308,9 @@ The fallback plugin choice is yours; the chain + WARP scripts work with any of t
   (If the `.vbs` is missing, re-run `setup-windows.ps1` or create it from the manual steps above. New installs already get the silent launcher automatically.)
 - **`git push` used to fail with "curl 52 Empty reply" over WARP** → fixed: `git config --global http.version HTTP/1.1` (pushes now work with WARP connected — no more disconnecting).
 - **Watcher not rotating** → confirm `warp-cli status` says `Connected`; logs at `~/.config/opencode/warp-rotate/watch.log` and `warp-rotate.log`.
-- **WARP manually disconnected → Zen limit instantly reached** → the moment you disconnect, your real ISP IP (already quota-burned) is exposed, so Big Pickle fails again. `rotate-warp.ps1` now self-heals: if WARP is not `Connected` when a rotation is requested, it reconnects WARP first (waiting through the "happy eyeballs" handshake), then rotates — a fresh WARP IP resets the Zen window. The watchdog (`opencode-warp-start.ps1`) also now waits up to 60s for `Connected` instead of giving up after 3s. If you want WARP off for a while, expect Big Pickle to stay dead until it's back; the Google/OpenRouter lanes still carry the session.
+- **WARP manually disconnected → Zen limit instantly reached** → the moment you disconnect, your real ISP IP (already quota-burned) is exposed, so Big Pickle fails again. `rotate-warp.ps1` now self-heals: if WARP is not `Connected` when a rotation is requested, it reconnects WARP first (waiting through the "happy eyeballs" handshake), then rotates — a fresh WARP IP resets the Zen window. The watchdog (`opencode-warp-start.ps1`) also now waits up to 60s for `Connected` instead of giving up after 3s. If you want WARP off for a while, expect Big Pickle to stay dead until it's back (strict mode has no other model to lean on).
 - **IP didn't change** → WARP sometimes reissues the same address; the script retries 3×. Wait ~10 min and rotate again.
-- **WARP IPs are shared** → a fresh WARP address may occasionally arrive already quota-burned by another Zen free user. The fallback chain still keeps your session alive; the next rotation usually lands a clean one.
+- **WARP IPs are shared** → a fresh WARP address may occasionally arrive already quota-burned by another Zen free user. Re-send after the next rotation usually lands a clean one.
 - **Free model quota resets** → Zen's ~50 req / 5h window resets on its own; the WARP rotation just makes you reach it sooner.
 
 ## Honest Caveats

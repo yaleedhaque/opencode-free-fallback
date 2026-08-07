@@ -27,6 +27,13 @@ function Get-FallbackModels([string]$Path) {
 
 $chain = @(Get-FallbackModels $FallbackConfig)
 
+if ($chain.Count -eq 0) {
+    $msg = "=== FALLBACK CHAIN VERIFICATION ===`nSTRICT MODE - fallback_models is empty (big-pickle only, no model switching). Nothing to verify. To enable a chain, add models to opencode-fallback.jsonc."
+    Write-Host $msg
+    $msg | Out-File -FilePath $Log -Append -Encoding utf8
+    exit 0
+}
+
 $modelsRaw = @(opencode models 2>$null)
 $modelSet = @{}
 foreach ($line in $modelsRaw) {

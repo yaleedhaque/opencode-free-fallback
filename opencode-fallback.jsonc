@@ -1,16 +1,24 @@
 {
-  // Auto-switch models when Big Pickle hits the Zen free IP limit.
+  // STRICT BIG-PICKLE MODE (2026-08-07).
   // Config for the opencode-runtime-fallback plugin (https://github.com/youngbinkim0/opencode-fallback).
   //
-  // BIG-PICKLE-ONLY MODE (2026-08-06):
-  // The chain contains ONLY opencode/*-free models. These SHARE big-pickle's
-  // per-IP free quota, so on a burned IP they fail instantly too. That failure
-  // logs "Auto-retrying with fallback model" -> the WARP watcher rotates the
-  // IP -> after cooldown the plugin auto-recovers to big-pickle. Google and
-  // OpenRouter are deliberately NOT in the chain: they have independent quotas
-  // and would actually serve replies during the window (user: they don't work
-  // properly). With a Zen-only chain, big-pickle is effectively the ONLY model
-  // that ever answers; WARP rotation is what makes it "unlimited".
+  // USER RULE: ONLY opencode/big-pickle is allowed to answer. When the Zen free
+  // IP limit is reached, opencode must NOT switch to any other model.
+  //
+  // The fallback chain is deliberately EMPTY:
+  //   - When big-pickle hits the limit, the plugin logs "Provider retry detected"
+  //     (the WARP watcher's rotation trigger) and then shows a "Provider
+  //     Retrying (no fallback models configured)" toast -- it does NOT replay the
+  //     turn on another model (plugin dist/index.js: fallbackModels.length === 0
+  //     -> return without dispatch).
+  //   - No model EVER serves a reply other than big-pickle.
+  //   - The WARP watcher rotates the IP, then you re-send the message manually;
+  //     big-pickle answers from the fresh IP.
+  //
+  // Previous "BIG-PICKLE-ONLY" mode (2026-08-06) kept a chain of opencode/*-free
+  // models as rotation triggers. In practice one of them (nemotron-3-ultra-free)
+  // DID serve replies during the window (seen 2026-08-07 15:54 UTC) -- the user
+  // said stop: never change to any other model.
   "enabled": true,
 
   // HTTP status codes that trigger a fallback to the next model.
@@ -32,44 +40,25 @@
     "overloaded"
   ],
 
-  // Max fallback attempts per request. The Zen-only chain is 6 models; 10 gives
-  // headroom while still surfacing errors fast on a burned IP (don't churn).
+  // With an empty chain no fallback attempts happen; kept for forwards-compat.
   "max_fallback_attempts": 10,
 
-  // How long (seconds) a failed model stays in cooldown. 180s (3 min) gives the
-  // WARP rotation watcher ~2-3x margin to refresh the IP (rotations verified
-  // ~30-45s), then auto-recovers to big-pickle faster than the old 300s. If a
-  // slow rotation makes big-pickle fail again, it just re-enters cooldown.
+  // WARP rotation is verified ~30-45s; 180s is a safe manual-retry cadence.
   "cooldown_seconds": 180,
 
-  // Abort a fallback model if no token within 90s, then try the next.
+  // Abort a fallback model if no token within 90s (unused with an empty chain).
   "timeout_seconds": 90,
 
-  // Toast when switching models.
+  // Toast when the provider retries -- shows "Provider Retrying (no fallback
+  // models configured)" so you know the limit was hit and WARP is rotating.
   "notify_on_fallback": true,
 
-  // BIG-PICKLE-ONLY fallback chain, tried in order.
-  //
-  // ONLY opencode/*-free models. These SHARE big-pickle's per-IP Zen quota, so
-  // on a burned IP they fail instantly — which is exactly the point: the failure
-  // fires the "Auto-retrying with fallback model" log line, the WARP watcher
-  // rotates the IP, and after cooldown the plugin auto-recovers to big-pickle.
-  //
-  // Google + OpenRouter are NOT here (they have independent quotas and would
-  // actually serve replies — the user reported they don't work properly). With a
-  // Zen-only chain, big-pickle is the only model that ever answers; the chain
-  // entries exist purely to trigger rotation.
-  "fallback_models": [
-    "opencode/deepseek-v4-flash-free",
-    "opencode/mimo-v2.5-free",
-    "opencode/laguna-s-2.1-free",
-    "opencode/ling-3.0-flash-free",
-    "opencode/north-mini-code-free",
-    "opencode/nemotron-3-ultra-free"
-  ]
+  // EMPTY ON PURPOSE: no other model is ever allowed to answer. See header.
+  "fallback_models": []
 }
 
-// EXTRA LANES - uncomment each block AFTER adding the provider key via
+// OPTIONAL RECOVERY LANES - if you ever want a REAL (non-big-pickle) fallback
+// to serve replies, uncomment a block AFTER adding the provider key via
 // `opencode auth login` (guide: README.md "Adding free provider lanes").
 // These give independent, high-volume free quotas:
 //
